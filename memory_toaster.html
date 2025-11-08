@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Memory Spike Monitor</title>
+  <style>
+    body {
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: #f8f9fa;
+      padding: 20px;
+      color: #222;
+    }
+    h2 { margin: 0 0 12px 0; }
+    #infoPanel {
+      background: #fff;
+      border-radius: 10px;
+      padding: 16px 24px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+      max-width: 520px;
+      line-height: 1.6;
+      margin-bottom: 30px;
+    }
+    .label { font-weight: 600; color: #444; }
+    .value { color: #000; }
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: #d93025;
+      color: #fff;
+      padding: 16px 22px;
+      border-radius: 10px;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+      opacity: 0;
+      transform: translateY(20px);
+      transition: all 0.35s ease;
+      font-size: 15px;
+      z-index: 9999;
+      max-width: 420px;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .muted { color: #6a6a6a; }
+    .ok { color: #0e7a0d; }
+    .warn { color: #b00020; }
+  </style>
+</head>
+<body>
+  <h2>🚀 Real-Time Creo Memory Monitor</h2>
+
+  <div id="infoPanel">
+    <div><span class="label">Trail File:</span> <span id="trailFile" class="value">N/A</span></div>
+    <div><span class="label">Polling Interval:</span> <span id="pollInterval" class="value">N/A</span> sec</div>
+    <div><span class="label">Current Memory:</span> <span id="memCurrent" class="value">N/A</span> MB</div>
+    <div><span class="label">Change (ΔMB):</span> <span id="memPrevious" class="value">N/A</span> MB</div>
+    <div><span class="label">Last Event:</span> <span id="lastEvent" class="value muted">Waiting...</span></div>
+  </div>
+
+  <script>
+    // --- Notification setup ---
+    if ("Notification" in window) {
+      if (Notification.permission === "default") {
+        Notification.requestPermission().catch(() => {});
+      }
+      console.log("Notification permission:", Notification.permission);
+    }
+
+    window.addEventListener("load", () => {
+      if (Notification.permission === "granted") {
+        new Notification("Creo Monitor Ready", { body: "Desktop notifications are active." });
+      } else {
+        console.log("Notifications not granted yet.");
+      }
+    });
+
+    function showDesktopAlert(message) {
+      if (!("Notification" in window)) return false;
+      if (Notification.permission !== "granted") return false;
+      try {
+        new Notification("Creo Memory Warning", { body: message });
+        return true;
+      } catch (e) {
+        console.error("Notification error:", e);
+        return false;
+      }
+    }
+
+function showToast(message) {
+  // remove any previous alert
+  document.querySelectorAll(".toast").forEach(t => t.remove());
+
+  const toast = document.createElement("div");
+  toast.className = "toast";
+
+  // === Full-screen red warning style ===
+  toast.style.position = "fixed";
+  toast.style.top = "50%";
+  toast.style.left = "50%";
+  toast.style.transform = "translate(-50%, -50%)";
+  toast.style.background = "#b71c1c";  // deeper red
+  toast.style.color = "white";
+  toast.style.padding = "40px 60px";
+  toast.style.borderRadius = "12px";
+  toast.style.fontSize = "22px";
+  toast.style.fontWeight = "bold";
+  toast.style.textAlign = "center";
+  toast.style.boxShadow = "0 0 25px rgba(0,0,0,0.5)";
+  toast.style.zIndex = "99999";
+  toast.style.opacity = "0";
+  toast.style.transition = "opacity 0.4s ease";
+  toast.textContent = message;
+
+  // --- Close button ---
+  const closeBtn = document.createElement("button");
+  closeBtn.textContent = "×";
+  closeBtn.style.position = "absolute";
+  closeBtn.style.top = "8px";
+  closeBtn.style.right = "12px";
+  closeBtn.style.background = "transparent";
+  closeBtn.style.color = "white";
+  closeBtn.style.border = "none";
+  closeBtn.style.fontSize = "28px";
+  closeBtn.style.cursor = "pointer";
+  closeBtn.style.fontWeight = "bold";
+  closeBtn.title = "Close";
+
+  closeBtn.addEventListener("click", () => {
+    toast.style.opacity = "0";
+    setTimeout(() => toast.remove(), 300);
+  });
+
+  toast.appendChild(closeBtn);
+  document.body.appendChild(toast);
+
+  // fade in
+  requestAnimationFrame(() => { toast.style.opacity = "1"; });
+
+  // auto hide after 10 seconds if not closed manually
+  setTimeout(() => {
+    if (document.body.contains(toast)) {
+      toast.style.opacity = "0";
+      setTimeout(() => toast.remove(), 400);
+    }
+  }, 10000);
+}
+
+
+
+
+    const trailFileEl = document.getElementById("trailFile");
+    const pollIntervalEl = document.getElementById("pollInterval");
+    const memCurrentEl = document.getElementById("memCurrent");
+    const memPrevEl = document.getElementById("memPrevious");
+    const lastEventEl = document.getElementById("lastEvent");
+
+    const eventSource = new EventSource("http://localhost:8000/stream");
+
+    // === Memory events ===
+    eventSource.addEventListener("memory_event", (event) => {
+      const data = safeParse(event.data);
+      if (!data) return;
+      const msg = data.message || "Memory increased, save your work now!";
+      const pushed = showDesktopAlert(msg);
+      if (!pushed) showToast(`⚠️ ${msg}`, 8000);
+    });
+
+    // === Command events (ProCmd trigger) ===
+    eventSource.addEventListener("command_event", (event) => {
+      const data = safeParse(event.data);
+      if (!data) return;
+      const msg = data.message || "Memory increased, save your work now!";
+      const pushed = showDesktopAlert(msg);
+      if (!pushed) showToast(`⚠️ ${msg}`, 8000);
+    });
+
+    // === File changes ===
+    eventSource.addEventListener("file_change", (event) => {
+      const data = safeParse(event.data);
+      if (!data) return;
+      if (data.trailFile) trailFileEl.textContent = data.trailFile;
+      lastEventEl.innerHTML = `<span class="ok">${escapeHtml(data.message || "Monitoring new file")}</span>`;
+    });
+
+    // === Heartbeat ===
+    eventSource.addEventListener("heartbeat", (event) => {
+      const data = safeParse(event.data);
+      if (!data) return;
+      if (data.trailFile) trailFileEl.textContent = data.trailFile;
+      if (typeof data.pollInterval === "number") pollIntervalEl.textContent = data.pollInterval;
+      lastEventEl.innerHTML = `<span class="muted">🩺 Monitoring (${new Date().toLocaleTimeString()})</span>`;
+    });
+
+    eventSource.onerror = () => {
+      lastEventEl.innerHTML = `<span class="warn">SSE connection lost. Retrying...</span>`;
+    };
+
+    // Utility helpers
+    function safeParse(s) { try { return JSON.parse(s); } catch { return null; } }
+    function escapeHtml(s="") {
+      return s.replace(/[&<>"']/g, (m) => ({
+        "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+      }[m]));
+    }
+  </script>
+</body>
+</html>
